@@ -16,7 +16,7 @@ class RSVPPredictor:
         self.trainer.model.eval()
 
     def get_delays(self, sentence):
-        predictions = self.trainer.predict(sentence)
+        predictions = self.trainer.predict(sentence,0.1)
         return {
             "sentence": sentence,
             "delays": [
@@ -27,7 +27,7 @@ class RSVPPredictor:
 
 predictor = RSVPPredictor()
 
-@app.route('/process_text', methods=['POST'])
+@app.route('/process-text', methods=['POST'])
 def process_text():
     if not request.is_json:
         return jsonify({"error": "Content-Type must be application/json"}), 400

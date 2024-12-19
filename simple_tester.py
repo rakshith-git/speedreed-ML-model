@@ -11,12 +11,12 @@ class RSVPVisualizer:
         self.trainer.model.load_state_dict(torch.load(model_path))
         self.trainer.model.eval()  # Set to evaluation mode
     
-    def visualize_sentence(self, sentence: str, base_delay: float = 0.25):
+    def visualize_sentence(self, sentence: str, base_delay: float = 0.1):
         """
         Visualize the word delays for a sentence
         """
         # Get predictions
-        predictions = self.trainer.predict(sentence)
+        predictions = self.trainer.predict(sentence,base_delay)
         
         # Separate words and delays
         words, delays = zip(*predictions)
