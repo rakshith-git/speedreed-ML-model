@@ -164,6 +164,7 @@ class SimpleRSVPTrainer:
     Training process updated for enhanced feature set
     """
     def __init__(self):
+        # Check if CUDA is available, otherwise use CPU
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.feature_extractor = SimpleFeatureExtractor()
         
@@ -171,6 +172,20 @@ class SimpleRSVPTrainer:
         self.model = SimpleRSVPModel(input_dim=200).to(self.device)
         self.optimizer = optim.Adam(self.model.parameters(), lr=0.001)
         self.loss_fn = nn.MSELoss()
+    
+    def load_model(self, model_path: str):
+        """
+        Load model weights with proper device mapping
+        """
+        state_dict = torch.load(model_path, map_location=self.device)
+        self.model.load_state_dict(state_dict)
+        self.model.to(self.device)
+    
+    def save_model(self, path: str):
+        """
+        Save model weights
+        """
+        torch.save(self.model.state_dict(), path)
     
     def train(self, sentences: List[str], multipliers: List[List[float]], 
               epochs: int = 100, batch_size: int = 4):

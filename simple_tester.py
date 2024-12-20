@@ -1,14 +1,14 @@
 import torch
 import matplotlib.pyplot as plt
-from simple_model import SimpleRSVPTrainer  # Import your model class
 import seaborn as sns
 import numpy as np
+from simple_model import SimpleRSVPTrainer
+
 class RSVPVisualizer:
     def __init__(self, model_path="best_simple_rsvp_model.pth"):
         self.trainer = SimpleRSVPTrainer()
-        
-        # Load the saved model
-        self.trainer.model.load_state_dict(torch.load(model_path))
+        # Use the new load_model method with proper device handling
+        self.trainer.load_model(model_path)
         self.trainer.model.eval()  # Set to evaluation mode
     
     def visualize_sentence(self, sentence: str, base_delay: float = 0.1):
@@ -16,7 +16,7 @@ class RSVPVisualizer:
         Visualize the word delays for a sentence
         """
         # Get predictions
-        predictions = self.trainer.predict(sentence,base_delay)
+        predictions = self.trainer.predict(sentence, base_delay)
         
         # Separate words and delays
         words, delays = zip(*predictions)
@@ -46,7 +46,6 @@ class RSVPVisualizer:
         plt.grid(True, axis='y', linestyle='--', alpha=0.7)
         
         return plt.gcf()  # Return the figure
-    
 
 def test_sentences():
     # Initialize visualizer
@@ -58,7 +57,6 @@ def test_sentences():
         "Campaigns involve debating and advertising to sway voters, elections determine who holds office",
         "The quick brown fox jumped over the lazy dog. Politics is the practice and theory of government.",
         "Politics is the practice and theory of government",
-        # Add more test sentences as needed
     ]
     
     # Create visualizations for each sentence
@@ -67,7 +65,6 @@ def test_sentences():
         fig1 = visualizer.visualize_sentence(sentence)
         fig1.savefig(f'sentence_{i}_bars.png')
         plt.close(fig1)
-        
         
         # Print the predictions
         predictions = visualizer.trainer.predict(sentence)
