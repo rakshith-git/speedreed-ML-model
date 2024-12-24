@@ -11,16 +11,12 @@ import time
 from typing import List, Dict, Any, Tuple, Optional
 from dataclasses import dataclass
 from functools import lru_cache
-import signal
 from simple_model import SimpleRSVPTrainer
-from contextlib import contextmanager
 import gc
 from dotenv import load_dotenv
 
-# Load environment variables
 load_dotenv()
 
-# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 handler = RotatingFileHandler('app.log', maxBytes=10000000, backupCount=5)
@@ -31,7 +27,6 @@ logger.addHandler(handler)
 
 @dataclass
 class ModelConfig:
-    """Model configuration settings"""
     model_path: str = os.getenv('MODEL_PATH', 'best_simple_rsvp_model.pth')
     spacy_model: str = os.getenv('SPACY_MODEL', 'en_core_web_lg')
     device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -41,33 +36,62 @@ class ModelConfig:
     cache_size: int = int(os.getenv('CACHE_SIZE', 1000))
 
 class TimeoutError(Exception):
-    """Custom timeout exception"""
     pass
 
-# @contextmanager
-# def timeout(seconds: int):
-#     """Context manager for timeouts"""
-#     def signal_handler(signum, frame):
-#         raise TimeoutError("Request timed out")
-#
-#     signal.signal(signal.SIGALRM, signal_handler)
-#     signal.alarm(seconds)
-#     try:
-#         yield
-#     finally:
-#         signal.alarm(0)
-
-# Remove the signal-based context manager and use simple time-based checking instead
 def process_with_timeout(func, timeout_seconds: int, *args, **kwargs):
-    """Execute function with timeout"""
     start_time = time.time()
     result = func(*args, **kwargs)
     if time.time() - start_time > timeout_seconds:
         raise TimeoutError("Request timed out")
     return result
 
+class RSVPPredictor:
+    def __init__(self, model_path: str):
+        try:
+            logger.info(f"Initializing RSVPPredictor with model path: {model_path}")
+            self._trainer = SimpleRSVPTrainer()
+            
+            # Check if model file exists
+            if not os.path.exists(model_path):
+                raise FileNotFoundError(f"Model file not found at path: {model_path}")
+            
+            # Load model with error catching
+            load_success = self._trainer.load_model(model_path)
+            if not load_success:
+                raise RuntimeError("Failed to load model")
+                
+            self._trainer.model.eval()
+            self.device = ModelConfig().device
+            logger.info("RSVPPredictor initialization successful")
+            
+        except Exception as e:
+            logger.error(f"Error initializing RSVPPredictor: {str(e)}")
+            raise RuntimeError(f"Failed to initialize RSVPPredictor: {str(e)}")
+    
+    @lru_cache(maxsize=ModelConfig().cache_size)
+    def get_delays(self, sentence: str, base_delay: float = 0.2) -> Dict[str, Any]:
+        if not hasattr(self, '_trainer'):
+            raise RuntimeError("RSVPPredictor not properly initialized")
+            
+        try:
+            predictions = process_with_timeout(
+                self._trainer.predict,
+                ModelConfig().request_timeout,
+                sentence,
+                base_delay
+            )
+            return {
+                "sentence": sentence,
+                "delays": [
+                    {"word": word, "delay": float(delay)}
+                    for word, delay in predictions
+                ]
+            }
+        except Exception as e:
+            logger.error(f"Error processing sentence: {str(e)}")
+            raise
+
 class ModelManager:
-    """Manages model loading and cleanup"""
     _instance = None
     
     def __new__(cls):
@@ -84,7 +108,6 @@ class ModelManager:
             self.initialized = True
     
     def load_models(self):
-        """Lazy load models"""
         if self.nlp is None:
             logger.info("Loading spaCy model...")
             self.nlp = spacy.load(self.config.spacy_model)
@@ -94,60 +117,25 @@ class ModelManager:
             self.predictor = RSVPPredictor(self.config.model_path)
     
     def cleanup(self):
-        """Cleanup model resources"""
-        if self.predictor:
-            self.predictor.cleanup()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        gc.collect()
-
-class RSVPPredictor:
-    """RSVP prediction handler with caching and resource management"""
-    def __init__(self, model_path: str):
-        self.trainer = SimpleRSVPTrainer()
-        self.trainer.load_model(model_path)
-        self.trainer.model.eval()
-        self.device = ModelConfig().device
-    
-    @lru_cache(maxsize=ModelConfig().cache_size)
-    def get_delays(self, sentence: str, base_delay: float = 0.2) -> Dict[str, Any]:
-        """Get word delays for a sentence with caching"""
         try:
-            predictions = process_with_timeout(
-                self.trainer.predict,
-                ModelConfig().request_timeout,
-                sentence,
-                base_delay
-            )
-            return {
-                "sentence": sentence,
-                "delays": [
-                    {"word": word, "delay": float(delay)}
-                    for word, delay in predictions
-                ]
-            }
+            if self.predictor:
+                self.predictor.cleanup()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            gc.collect()
         except Exception as e:
-            logger.error(f"Error processing sentence: {str(e)}")
-            raise
-    
-    def cleanup(self):
-        """Cleanup predictor resources"""
-        del self.trainer
-        torch.cuda.empty_cache() if torch.cuda.is_available() else None
+            logger.error(f"Error during cleanup: {str(e)}")
 
 def create_app() -> Flask:
-    """Application factory"""
     app = Flask(__name__)
     CORS(app)
     
-    # Configure rate limiting
     limiter = Limiter(
         get_remote_address,
         app=app,
-        default_limits=["200 per day", "50 per hour"]
+        default_limits=["2000 per day", "500 per hour"]
     )
     
-    # Initialize model manager
     model_manager = ModelManager()
     
     with app.app_context():
@@ -155,8 +143,10 @@ def create_app() -> Flask:
     
     @app.teardown_appcontext
     def cleanup_models(exception):
-        """Cleanup models on app teardown"""
-        model_manager.cleanup()
+        try:
+            model_manager.cleanup()
+        except Exception as e:
+            logger.error(f"Error in teardown: {str(e)}")
     
     @app.route('/health', methods=['GET'])
     def health_check() -> Tuple[Dict[str, str], int]:
@@ -173,7 +163,7 @@ def create_app() -> Flask:
         }), 200
     
     @app.route('/process-text', methods=['POST'])
-    @limiter.limit("10 per minute")
+    @limiter.limit("100 per minute")
     def process_text() -> Tuple[Dict[str, Any], int]:
         """Process text endpoint with validation and batching"""
         start_time = time.time()

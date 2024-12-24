@@ -1,3 +1,4 @@
+import os
 import spacy
 import numpy as np
 import torch
@@ -9,50 +10,52 @@ from transformers import pipeline
 from sklearn.preprocessing import MinMaxScaler
 
 class SimpleFeatureExtractor:
-    """
-    Enhanced feature extractor with dependency parsing, word vectors, and sentiment
-    """
     def __init__(self, nlp_model='en_core_web_lg'):
         self.nlp = spacy.load(nlp_model)
-        # Initialize sentiment analyzer
-        self.sentiment_analyzer = pipeline('sentiment-analysis', model='distilbert-base-uncased-finetuned-sst-2-english')
+        
+        # Make transformer optional
+        try:
+            self.sentiment_analyzer = pipeline('sentiment-analysis', 
+                model='distilbert-base-uncased-finetuned-sst-2-english')
+        except:
+            self.sentiment_analyzer = None
         # Scaler for word vectors
         self.vector_scaler = MinMaxScaler()
         
         # Original POS weights
         self.pos_weights = {
-            'NOUN': 1.2,
-            'VERB': 1.1,
-            'ADJ': 1.3,
-            'ADV': 1.15,
-            'PROPN': 1.4,
-            'NUM': 1.25,
+            'NOUN': 1.8,
+            'VERB': 1.5,
+            'ADJ': 1.7,
+            'ADV': 1.3,
+            'PROPN': 1.9,
+            'NUM': 1.9,
             'PUNCT': 0.5,
             'DET': 0.6,
         }
         
         # NER weights
         self.ner_weights = {
-            'PERSON': 1.4,
-            'ORG': 1.3,
-            'GPE': 1.3,
-            'DATE': 1.2,
-            'TIME': 1.2,
-            'MONEY': 1.25,
-            'PERCENT': 1.25,
-            'PRODUCT': 1.3,
-            'EVENT': 1.35,
-            'WORK_OF_ART': 1.4,
+            'PERSON': 2.4,
+            'ORG': 2.3,
+            'GPE': 2.3,
+            'DATE': 2.2,
+            'TIME': 2.2,
+            'MONEY': 2.25,
+            'PERCENT': 2.25,
+            'PRODUCT': 2.3,
+            'EVENT': 2.35,
+            'WORK_OF_ART': 2.4,
         }
         
         # New dependency parsing weights
         self.dep_weights = {
-            'ROOT': 1.4,     # Main verb
-            'nsubj': 1.3,    # Subject
-            'dobj': 1.2,     # Direct object
-            'iobj': 1.2,     # Indirect object
-            'amod': 1.1,     # Adjectival modifier
-            'compound': 1.2,  # Compound words
+            'ROOT': 1.8,     # Main verb
+            'nsubj': 1.6,    # Subject
+            'dobj': 1.4,     # Direct object
+            'iobj': 1.4,     # Indirect object
+            'amod': 1.2,     # Adjectival modifier
+            'compound': 1.4,  # Compound words
             'conj': 1.1,     # Conjunction
             'cc': 0.8,       # Coordinating conjunction
             'det': 0.7,      # Determiner
@@ -62,11 +65,14 @@ class SimpleFeatureExtractor:
         }
     
     def get_sentiment_score(self, sentence: str) -> float:
-        """Get sentiment score normalized to 0-1 range"""
-        result = self.sentiment_analyzer(sentence)[0]
-        # Convert sentiment to score (positive = higher score)
-        score = result['score'] if result['label'] == 'POSITIVE' else 1 - result['score']
-        return score
+        """Get sentiment score with fallback"""
+        if self.sentiment_analyzer:
+            try:
+                result = self.sentiment_analyzer(sentence)[0]
+                return result['score'] if result['label'] == 'POSITIVE' else 1 - result['score']
+            except:
+                pass
+        return 0.5  # Neutral fallback
     
     def process_word_vector(self, vector: np.ndarray) -> float:
         """Process word vector to a single meaningful value"""
@@ -160,32 +166,42 @@ class SimpleRSVPModel(nn.Module):
         return self.model(x) + 0.5
 
 class SimpleRSVPTrainer:
-    """
-    Training process updated for enhanced feature set
-    """
     def __init__(self):
-        # Check if CUDA is available, otherwise use CPU
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.feature_extractor = SimpleFeatureExtractor()
-        
-        # Input dim is 200 (20 words * 10 features per word)
-        self.model = SimpleRSVPModel(input_dim=200).to(self.device)
-        self.optimizer = optim.Adam(self.model.parameters(), lr=0.001)
-        self.loss_fn = nn.MSELoss()
+        try:
+            # Check if CUDA is available, otherwise use CPU
+            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            print(f"Using device: {self.device}")
+            
+            # Initialize feature extractor with basic spaCy model
+            self.feature_extractor = SimpleFeatureExtractor('en_core_web_lg')  # Use smaller model initially
+            
+            # Input dim is 200 (20 words * 10 features per word)
+            self.model = SimpleRSVPModel(input_dim=200).to(self.device)
+            self.optimizer = optim.Adam(self.model.parameters(), lr=0.001)
+            self.loss_fn = nn.MSELoss()
+            print("SimpleRSVPTrainer initialized successfully")
+        except Exception as e:
+            print(f"Error initializing SimpleRSVPTrainer: {str(e)}")
+            raise
     
-    def load_model(self, model_path: str):
+    def load_model(self, model_path: str) -> bool:
         """
-        Load model weights with proper device mapping
+        Load model weights with proper device mapping and error handling
         """
-        state_dict = torch.load(model_path, map_location=self.device)
-        self.model.load_state_dict(state_dict)
-        self.model.to(self.device)
-    
-    def save_model(self, path: str):
-        """
-        Save model weights
-        """
-        torch.save(self.model.state_dict(), path)
+        try:
+            if not os.path.exists(model_path):
+                print(f"Model file not found at {model_path}")
+                return False
+                
+            state_dict = torch.load(model_path, map_location=self.device)
+            self.model.load_state_dict(state_dict)
+            self.model.to(self.device)
+            self.model.eval()  # Set to evaluation mode
+            print(f"Model loaded successfully from {model_path}")
+            return True
+        except Exception as e:
+            print(f"Error loading model: {str(e)}")
+            return False
     
     def train(self, sentences: List[str], multipliers: List[List[float]], 
               epochs: int = 100, batch_size: int = 4):
