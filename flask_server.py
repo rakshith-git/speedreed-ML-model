@@ -27,7 +27,7 @@ logger.addHandler(handler)
 
 @dataclass
 class ModelConfig:
-    model_path: str = os.getenv('MODEL_PATH', 'best_simple_rsvp_model.pth')
+    model_path: str = os.getenv('MODEL_PATH', 'best_simple_rsvp_model2.pth')
     spacy_model: str = os.getenv('SPACY_MODEL', 'en_core_web_lg')
     device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
     max_text_length: int = int(os.getenv('MAX_TEXT_LENGTH', 10000))
